@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# Build output
+dist/
+build/
+.next/
+out/
+.turbo/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE & OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Claude Code
+.claude/handovers/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 内部管理ファイル（公開しない・ルート直下のみ）
+/CLAUDE.md
+/.claude/

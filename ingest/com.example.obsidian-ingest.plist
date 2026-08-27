@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchdテンプレート。
+  __STARTER_DIR__ をこのスターターキットの絶対パスに置換してから、
+  ~/Library/LaunchAgents/com.example.obsidian-ingest.plist へ配置してください。
+  例: __STARTER_DIR__/ingest/run.sh
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.example.obsidian-ingest</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__STARTER_DIR__/ingest/run.sh</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>5</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>__STARTER_DIR__/ingest/logs/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__STARTER_DIR__/ingest/logs/launchd.err.log</string>
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>
