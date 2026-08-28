@@ -54,6 +54,23 @@ def log(message: str) -> None:
     print(f"[{ts}] {message}")
 
 
+def response_text(response) -> str:
+    """API応答から本文テキストだけを連結して返す。
+    思考ブロック等のtextを持たないブロックが混ざっても落ちないようにする。"""
+    parts = []
+    for block in getattr(response, "content", []) or []:
+        if getattr(block, "type", None) == "text" and getattr(block, "text", None):
+            parts.append(block.text)
+    if parts:
+        return "\n".join(parts)
+    # 念のためのフォールバック
+    for block in getattr(response, "content", []) or []:
+        text = getattr(block, "text", None)
+        if text:
+            return text
+    return ""
+
+
 def load_state() -> dict:
     """処理済み状態を読む。壊れている場合は空で続行する。"""
     if not STATE_FILE.exists():
@@ -169,7 +186,7 @@ def triage_files(files: list[Path]) -> dict[str, list[dict]]:
         max_tokens=2000,
         messages=[{"role": "user", "content": prompt}],
     )
-    data = parse_json_object(response.content[0].text, "results")
+    data = parse_json_object(response_text(response), "results")
     if not data:
         log("トリアージ結果のパースに失敗しました")
         return {"A": [], "B": [], "C": []}
@@ -277,7 +294,7 @@ Markdownのみ出力してください。"""
             max_tokens=4000,
             messages=[{"role": "user", "content": prompt}],
         )
-        wiki_content = re.sub(r"^```(?:markdown|md)?\n", "", response.content[0].text)
+        wiki_content = re.sub(r"^```(?:markdown|md)?\n", "", response_text(response))
         wiki_content = re.sub(r"\n```$", "", wiki_content)
         wiki_content = sanitize_wikilinks(ensure_wiki_frontmatter(wiki_content), existing_stems)
         wiki_path = WIKI_DIR / f"{topic}.md"
@@ -414,7 +431,7 @@ def process_daily_notes(days: int, existing_stems: set[str]) -> None:
             max_tokens=3000,
             messages=[{"role": "user", "content": prompt}],
         )
-        data = parse_json_object(response.content[0].text, "insights")
+        data = parse_json_object(response_text(response), "insights")
         if data is None:
             # 解析失敗は処理済みにせず翌日再試行する
             log(f"デイリーノート {date_str}: 知見抽出のパースに失敗（翌日再試行）")

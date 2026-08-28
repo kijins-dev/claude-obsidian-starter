@@ -40,3 +40,14 @@ yarn-error.log*
 # 内部管理ファイル（公開しない・ルート直下のみ）
 /CLAUDE.md
 /.claude/
+
+# 実行時に生成される状態ファイル
+.processed.json
+.gardening.json
+ingest/.processed.json
+ingest/.gardening.json
+ingest/logs/
+
+# フックが生成する引き継ぎメモ（どの階層でも公開しない）
+.claude/
+**/.claude/

@@ -6,9 +6,13 @@ Claude Code（AIコーディングエージェント）にObsidian Vaultを「�
 ## これを入れると何ができるようになるか
 
 - **会話が自動で日記になる**: Claude Codeの応答が終わるたびに、そのセッションの要約がデイリーノートへ自動で書き込まれる（同じセッションは同じブロックが更新され続ける）
-- **技術メモが自動でwikiになる**: デイリーノート・Webクリップ・受信箱の未整理情報を、毎朝5時にAIがトピック別のwikiページへ整理する
+- **記憶が途切れない**: 長い会話が圧縮される直前に引き継ぎメモを残し、次のセッション開始時に自動で読み込ませる
+- **技術メモが自動でwikiになる**: デイリーノート・Webクリップ・受信箱の未整理情報を、毎朝AIがトピック別のwikiページへ整理する
+- **日記が週次・月次にまとまる**: 毎週月曜に先週分、毎月1日に先月分の振り返りノートを自動生成する
+- **散らばったwikiが束ねられる**: 同じテーマのノートが3本以上たまると「テーマ別まとめ」を自動で作る
 - **Claude CodeがVaultを迷わず読める**: 「どのフォルダに何があるか」の地図をルールファイルで渡すので、過去の判断や知見をAIが参照しながら働ける
 - **散らかりを毎週自動点検**: リンク切れ・孤立ノートを毎週月曜に検出してレポートする
+- **セッションに名前が付く**: 履歴から目的の会話を探しやすくなる
 
 ポイントは、**AIが賢いから読めるのではなく、地図とルールを渡してあるから読める**という設計です。
 
@@ -30,8 +34,8 @@ Claude Code（AIコーディングエージェント）にObsidian Vaultを「�
 あなた ⇄ Claude Code
             │
             ├─ [1] ルールファイル …… Vaultの地図。どこに何を書き、どこを読むか
-            ├─ [2] Stopフック ……… 会話終了のたびにデイリーノートへ自動記録（層1）
-            └─ [3] 自動整理 ………… 毎朝5時に未整理情報をwiki化＋週次点検（層2）
+            ├─ [2] フック ………… 会話のたびに記録し、記憶を次へ引き継ぐ（層1）
+            └─ [3] 自動整理 ……… 毎朝の整理と、週次・月次のまとめ（層2）
                      ↓
                 Obsidian Vault（ただのフォルダ。Obsidianを開いていなくても動く）
 ```
@@ -39,8 +43,13 @@ Claude Code（AIコーディングエージェント）にObsidian Vaultを「�
 | 部品 | 実体 | 例えると |
 |---|---|---|
 | ルールファイル | `templates/rules/obsidian.md` | 新人向け社内マニュアル |
-| Stopフック | `hooks/stop-daily-note.js`（応答終了ごとに発火） | 自動日報 |
-| 自動整理 | `ingest/` 一式（launchdで毎朝実行） | 夜間の清掃員 |
+| 日記フック | `hooks/stop-daily-note.js`（応答終了ごとに発火） | 自動日報 |
+| 引き継ぎフック | `hooks/pre-compact-handover.js` / `hooks/session-start-context.js` | 前任者からの申し送り |
+| 命名フック | `hooks/session-title.js` | 会話の背表紙 |
+| 毎朝の整理 | `ingest/ingest.py`（毎朝5時） | 夜間の清掃員 |
+| 週次・月次まとめ | `ingest/gen_weekly_note.py` / `gen_monthly_note.py` | 定例の振り返り |
+| wikiの整頓 | `ingest/wiki_gardening.py` / `weekly_lint.py` | 図書室の司書 |
+| 古い日記の片付け | `ingest/archive_daily_notes.py`（毎月1日） | 書庫への移動 |
 
 ## 必要なもの
 
@@ -81,12 +90,21 @@ cp templates/rules/obsidian.md ~/.claude/rules/obsidian.md
 
 これだけでClaude CodeはVaultの地図を持った状態になります。
 
-### Step 3: Stopフック（自動日報）を入れる
+### Step 3: フック（自動日報・引き継ぎ・命名）を入れる
 
 ```bash
 mkdir -p ~/.claude/hooks
-cp hooks/stop-daily-note.js ~/.claude/hooks/
+cp hooks/*.js ~/.claude/hooks/
 ```
+
+入るフックは4つです。
+
+| ファイル | 役割 |
+|---|---|
+| `stop-daily-note.js` | 応答が終わるたびにデイリーノートへ要約を記録 |
+| `pre-compact-handover.js` | 会話が圧縮される直前に引き継ぎメモを保存（API不要・無料） |
+| `session-start-context.js` | セッション開始時に前回の引き継ぎを読み込ませる（API不要・無料） |
+| `session-title.js` | セッションに「フォルダ名: 話題」の名前を付ける（API不要・無料） |
 
 設定ファイル `~/.claude/obsidian-starter.json` を作ります:
 
@@ -103,11 +121,36 @@ APIキーが入るファイルなので、自分以外に読めないよう権�
 chmod 600 ~/.claude/obsidian-starter.json
 ```
 
-最後に `~/.claude/settings.json` へフックを登録します（`hooks/settings-example.json` の内容を参考に、
-既存のsettings.jsonがある場合は `hooks` セクションへマージしてください）。
+最後に `~/.claude/settings.json` へフックを登録します。`hooks/settings-example.json` の
+`hooks` の中身を、あなたの `settings.json` の `hooks` へ追記してください（`_comment` 行は不要です）。
+
+**settings.json がまだ無い場合**はこれだけでOKです:
+
+```bash
+/usr/bin/python3 - <<'EOF'
+import json, os, pathlib
+src = json.load(open('hooks/settings-example.json'))
+src.pop('_comment', None)
+dst = pathlib.Path(os.path.expanduser('~/.claude/settings.json'))
+data = json.loads(dst.read_text()) if dst.exists() else {}
+hooks = data.setdefault('hooks', {})
+for event, entries in src['hooks'].items():
+    hooks.setdefault(event, []).extend(entries)   # 既存のフックは消さずに追記
+dst.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+print('登録しました')
+EOF
+```
+
+登録後、設定ファイルが壊れていないか必ず確認します:
+
+```bash
+/usr/bin/python3 -m json.tool ~/.claude/settings.json > /dev/null && echo "設定OK"
+```
 
 > フックは失敗しても黙って終了する設計なので、設定ミスでClaude Codeが動かなくなることはありません。
-> もしデイリーノートが書かれない場合は、settings.json内の `~` を絶対パス（`/Users/あなた/.claude/hooks/...`）に書き換えてみてください。
+> **裏を返すと、うまく動かないときも無言です。** デイリーノートが書かれない場合は、
+> (1) `~/.claude/obsidian-starter.json` のVaultパスとAPIキー、(2) `node -v` が18以上か、
+> (3) settings.json 内の `~` を絶対パス（`/Users/あなた/.claude/hooks/...`）に置き換える、の順に確認してください。
 
 ### Step 4: 自動整理（毎朝5時のwiki生成）を入れる
 
@@ -147,9 +190,15 @@ launchctl load ~/Library/LaunchAgents/com.example.obsidian-ingest.plist
 
 ### Step 5: 動作確認
 
-1. Claude Codeで何か短い作業をして会話を終える → Vaultの `01_01_デイリーノート/{今年}年/今日の日付.md` に要約ブロックができていれば **フックOK**
-2. Claude Codeに「Obsidianの02_プロジェクトに今日の設計判断を記録して」と頼む → 正しいフォルダ・正しい書式で書けば **ルールOK**
-3. 翌朝、`04_技術ドキュメント/` を確認 → 前日のメモが整理されていれば **自動整理OK**
+1. Claude Codeで何か作業（ファイルを1つ以上編集する程度）をして会話を終える → Vaultの `01_01_デイリーノート/{今年}年/今日の日付.md` に要約ブロックができていれば **日記フックOK**
+   （挨拶や一言だけのやりとりは、ノートを汚さないよう意図的に記録されません。ファイル変更が1つでもあるか、ツール操作2回以上か、発言3回以上のいずれかで記録されます）
+2. セッションの名前が「フォルダ名: 話題」に変わっていれば **命名フックOK**
+3. Claude Codeに「Obsidianの02_プロジェクトに今日の設計判断を記録して」と頼む → 正しいフォルダ・正しい書式で書けば **ルールOK**
+4. 翌朝、`04_技術ドキュメント/` を確認 → 前日のメモが整理されていれば **自動整理OK**
+5. 翌週、`01_02_ウィークリーノート/` に先週分のまとめができていれば **週次OK**
+   （週次・月次・古い日記の片付けは毎朝試行し、生成済みならすぐスキップします。
+   Macがスリープで月曜の実行を逃しても、翌日以降に自動で追いつきます。
+   なお週次ノートは、その週にデイリーノートが4日分以上ないと作られません）
 
 ## よくある質問
 
@@ -157,7 +206,19 @@ launchctl load ~/Library/LaunchAgents/com.example.obsidian-ingest.plist
 動きます。Vaultはただのフォルダで、全部品はファイルを直接読み書きします。Obsidianは「人間が読むときのビューア」です。
 
 **Q. APIコストはどれくらい？**
-Stopフックは応答終了ごとに1回の要約呼び出しが走りますが1回あたり1円未満、毎朝の自動整理は素材量によりますが月数百円程度が目安です。
+日記フックは応答終了ごとに要約を作りますが1回あたり1円未満で、同じセッションでは5分間キャッシュを使うため呼びすぎません。毎朝の自動整理・週次・月次は素材量によりますが月数百円程度が目安です。引き継ぎ・命名の3フックはAPIを使わないため無料です。
+
+**Q. 会話のたびにAPIへ何が送られる？**
+あなたの発言・変更したファイルのパス・最後の応答の冒頭だけです。ツールの実行結果（コマンド出力など）は送りません。APIキーやトークンらしき文字列は送信前に伏せ字にしています。
+
+**Q. 自分のノートが勝手に書き換わることはある？**
+テーマ別まとめを作ったとき、束ねた元のノートの先頭に `consolidated_into: まとめノート名` という1行が追加されます（本文は変更しません）。
+それ以外で既存ノートの中身を書き換えることはありません。事前に確認したい場合は `/usr/bin/python3 wiki_gardening.py --dry-run` で対象だけを表示できます。
+古い日記の月別フォルダへの移動も、移動先に同名ファイルがある場合は上書きせずスキップします（`--dry-run` あり）。
+
+**Q. 引き継ぎメモはどこに保存される？**
+作業中のプロジェクトの `.claude/handovers/` と、プロジェクトごとに分けた `~/.claude/handovers/` の2箇所です。
+プロジェクトをGitで管理している場合は、`.gitignore` に `.claude/handovers/` を追加しておくことをおすすめします。
 
 **Q. 失敗に気づける？**
 自動整理が失敗するとmacOSの通知が出ます。チャットツール（Slack等）への通知に差し替える方法は `docs/extensions.md` を参照。
