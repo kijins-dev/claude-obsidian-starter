@@ -236,6 +236,15 @@ def write_new(path: Path, content: str) -> None:
         handle.write(content)
 
 
+def is_too_early(spec_year: int, spec_month: int) -> bool:
+    """対象月の最終週の週次ノートが出そろう前に月次を確定しないための待機判定。
+    週次ノートは週明け以降に作られるため、翌月7日までは待つ。"""
+    today = date.today()
+    if (today.year, today.month) != (spec_year + (spec_month // 12), (spec_month % 12) + 1):
+        return False  # 翌月以外（さらに後の月）なら待たない
+    return today.day < 7
+
+
 def run(month_arg: str | None) -> int:
     """対象月を決めて月次ノートを生成する。"""
     env = require_env()
@@ -247,11 +256,18 @@ def run(month_arg: str | None) -> int:
     if output.exists():
         log(f"既存ファイルあり、API呼び出し前にスキップ: {output}")
         return 0
+    # 引数指定が無い（＝自動実行）ときだけ待機判定を使う。手動指定は即実行できる
+    if month_arg is None and is_too_early(spec.year, spec.month):
+        log(f"{spec.year}年{spec.month}月の最終週の週次ノートが揃うのを待っています（翌月7日以降に生成）。")
+        return 0
     notes = collect_weekly_notes(vault, spec)
     if not notes:
         log(f"{spec.year}年{spec.month}月の週次ノートが無いため生成しません。")
         return 0
     body = generate_body(api_key, spec, notes)
+    if not body or len(body.strip()) < 40:
+        # 生成に失敗（空・極端に短い）。書き込まず終了し、次回の実行で再試行する
+        return error("生成結果が不十分だったため書き込みませんでした。次回の実行で再試行します。")
     content = frontmatter(spec) + insert_weekly_links(body, vault, notes) + "\n"
     write_new(output, content)
     log(f"月次ノート作成: {output}")

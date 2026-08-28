@@ -104,12 +104,30 @@ def collect_candidates(vault: Path, today: date) -> list[ArchiveItem]:
 
 
 def move_without_overwrite(item: ArchiveItem) -> bool:
-    """移動先が存在しない場合だけ移動する。"""
+    """移動先が存在しない場合だけ移動する。
+    存在確認と移動の間に他プロセスが同名ファイルを作る可能性があるため、
+    「無い場合だけ作る」形（O_EXCL）で先に場所を押さえてから中身を移す。"""
     if item.destination.exists():
         log(f"移動先が既にあるためスキップ: {item.destination}")
         return False
     item.destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(item.source), str(item.destination))
+    try:
+        fd = os.open(item.destination, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    except FileExistsError:
+        log(f"移動先が既にあるためスキップ: {item.destination}")
+        return False
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(item.source.read_bytes())
+        shutil.copystat(item.source, item.destination)
+        item.source.unlink()
+    except Exception:
+        # 途中で失敗したら、押さえた場所を片付けて元ファイルは残す
+        try:
+            item.destination.unlink()
+        except OSError:
+            pass
+        raise
     return True
 
 

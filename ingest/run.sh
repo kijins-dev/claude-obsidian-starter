@@ -22,6 +22,7 @@ set +e
 /usr/bin/python3 "$SCRIPT_DIR/ingest.py" >> "$LOG_FILE" 2>&1
 EXIT_CODE=$?
 set -e
+FAILED_STEPS=0
 
 if [ "$EXIT_CODE" -ne 0 ]; then
   notify_failure "$EXIT_CODE"
@@ -34,6 +35,7 @@ if [ "$(date +%u)" = "1" ]; then
     LINT_EXIT_CODE=$?
     echo "=== weekly lint failed with exit code $LINT_EXIT_CODE ===" >> "$LOG_FILE"
     notify_failure "weekly-lint-$LINT_EXIT_CODE"
+    FAILED_STEPS=$((FAILED_STEPS + 1))
     true
   }
   echo "=== weekly lint finished at $(date) ===" >> "$LOG_FILE"
@@ -43,6 +45,7 @@ if [ "$(date +%u)" = "1" ]; then
     GARDEN_EXIT_CODE=$?
     echo "=== wiki gardening failed with exit code $GARDEN_EXIT_CODE ===" >> "$LOG_FILE"
     notify_failure "wiki-gardening-$GARDEN_EXIT_CODE"
+    FAILED_STEPS=$((FAILED_STEPS + 1))
     true
   }
   echo "=== wiki gardening finished at $(date) ===" >> "$LOG_FILE"
@@ -57,6 +60,7 @@ echo "=== weekly note started at $(date) ===" >> "$LOG_FILE"
   WEEKLY_NOTE_EXIT_CODE=$?
   echo "=== weekly note failed with exit code $WEEKLY_NOTE_EXIT_CODE ===" >> "$LOG_FILE"
   notify_failure "weekly-note-$WEEKLY_NOTE_EXIT_CODE"
+  FAILED_STEPS=$((FAILED_STEPS + 1))
   true
 }
 echo "=== weekly note finished at $(date) ===" >> "$LOG_FILE"
@@ -65,6 +69,7 @@ echo "=== monthly note started at $(date) ===" >> "$LOG_FILE"
   MONTHLY_NOTE_EXIT_CODE=$?
   echo "=== monthly note failed with exit code $MONTHLY_NOTE_EXIT_CODE ===" >> "$LOG_FILE"
   notify_failure "monthly-note-$MONTHLY_NOTE_EXIT_CODE"
+  FAILED_STEPS=$((FAILED_STEPS + 1))
   true
 }
 echo "=== monthly note finished at $(date) ===" >> "$LOG_FILE"
@@ -73,6 +78,7 @@ echo "=== daily archive started at $(date) ===" >> "$LOG_FILE"
   ARCHIVE_EXIT_CODE=$?
   echo "=== daily archive failed with exit code $ARCHIVE_EXIT_CODE ===" >> "$LOG_FILE"
   notify_failure "daily-archive-$ARCHIVE_EXIT_CODE"
+  FAILED_STEPS=$((FAILED_STEPS + 1))
   true
 }
 echo "=== daily archive finished at $(date) ===" >> "$LOG_FILE"
@@ -81,5 +87,11 @@ echo "=== obsidian-ingest finished at $(date) with exit code $EXIT_CODE ===" >> 
 
 # 30日より古いログを掃除する。
 find "$LOG_DIR" -name "ingest-*.log" -mtime +30 -delete 2>/dev/null || true
+
+# 追加処理が1つでも失敗していたら、監視で気づけるよう終了コードに反映する
+if [ "$EXIT_CODE" -eq 0 ] && [ "$FAILED_STEPS" -gt 0 ]; then
+  echo "=== $FAILED_STEPS 件の追加処理が失敗しました ===" >> "$LOG_FILE"
+  exit 1
+fi
 
 exit "$EXIT_CODE"

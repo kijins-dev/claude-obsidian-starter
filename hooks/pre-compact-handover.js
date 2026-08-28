@@ -125,10 +125,14 @@ function buildHandover(parsed, trigger, stamp) {
   return parts.join('\n');
 }
 
-/** 古い引き継ぎメモを削除して件数を保つ */
+/** 古い引き継ぎメモを削除して件数を保つ。
+ *  自分が作った名前の形（YYYY-MM-DD_HH-MM[_id].md）だけを対象にし、
+ *  同じフォルダに置かれた手書きメモや他ツールのファイルは消さない */
+const GENERATED_NAME = /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}(_[0-9a-f]{1,12})?\.md$/;
+
 function cleanupOld(dir, keep) {
   try {
-    const files = fs.readdirSync(dir).filter((f) => f.endsWith('.md')).sort();
+    const files = fs.readdirSync(dir).filter((f) => GENERATED_NAME.test(f)).sort();
     for (const f of files.slice(0, Math.max(0, files.length - keep))) {
       try { fs.unlinkSync(path.join(dir, f)); } catch { /* ignore */ }
     }

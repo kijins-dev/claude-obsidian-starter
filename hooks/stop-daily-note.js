@@ -332,8 +332,15 @@ function upsertDailyNote(vaultPath, sessionId, projectName, summary, changedFile
 
   try {
     const { block, start, end } = buildBlock(sessionId, projectName, summary, changedFiles);
+    // 読み込み失敗を一律「新規」と見なすと、一時的なエラーでその日の記録を
+    // まるごと置き換えてしまう。ファイルが無い場合だけ新規として扱う
     let content = '';
-    try { content = fs.readFileSync(dailyPath, 'utf8'); } catch { content = `# ${parts.date}\n`; }
+    try {
+      content = fs.readFileSync(dailyPath, 'utf8');
+    } catch (e) {
+      if (e && e.code === 'ENOENT') content = `# ${parts.date}\n`;
+      else return;
+    }
 
     const startIdx = content.indexOf(start);
     const endIdx = content.indexOf(end);
@@ -343,10 +350,16 @@ function upsertDailyNote(vaultPath, sessionId, projectName, summary, changedFile
       // 孤児の終了マーカーが前方にあると、間の本文ごと複製してしまうため）
       content = content.slice(0, startIdx) + block + content.slice(endIdx + end.length);
     } else if (startIdx !== -1) {
-      // 開始マーカーだけ残る破損状態。次のHTMLコメントの手前までを差し替える
+      // 開始マーカーだけ残る破損状態。次のHTMLコメントの手前までを差し替える。
+      // 後続マーカーが無い場合は末尾まで消さない（マーカー外の手書き追記を守るため、
+      // 壊れた開始マーカーはそのまま残し、新しいブロックを末尾に足すだけにする）
       const nextMarker = content.indexOf('<!-- ', startIdx + start.length);
-      const cutEnd = nextMarker === -1 ? content.length : nextMarker;
-      content = content.slice(0, startIdx) + block + content.slice(cutEnd);
+      if (nextMarker === -1) {
+        if (!content.endsWith('\n')) content += '\n';
+        content += `\n---\n\n${block}`;
+      } else {
+        content = content.slice(0, startIdx) + block + content.slice(nextMarker);
+      }
     } else {
       if (!content.endsWith('\n')) content += '\n';
       content += `\n---\n\n${block}`;

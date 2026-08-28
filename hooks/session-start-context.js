@@ -44,6 +44,10 @@ function latestProjectHandover(cwd) {
     const input = safeJson(await readStdin()) || {};
     const cwd = input.cwd;
 
+    // /clear や圧縮の直後は、利用者が意図的に文脈を切ったところなので注入しない
+    const source = String(input.source || '');
+    if (source === 'clear' || source === 'compact') return;
+
     // 非対話実行（claude -p や定時ジョブ）には引き継ぎを注入しない。
     // 単発のタスクが前回の残作業に勝手に着手してしまうのを防ぐため。
     // GUIやIDEでもエントリ点の名前は変わるので、除外したいものだけを列挙する

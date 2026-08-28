@@ -110,8 +110,11 @@ def load_state() -> dict[str, Any]:
 
 
 def save_state(state: dict[str, Any]) -> None:
-    """状態ファイルを読みやすいJSONで保存する。"""
-    STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    """状態ファイルを読みやすいJSONで保存する。書き込み途中で落ちても壊れないよう
+    一時ファイルに書いてから置き換える。"""
+    tmp = STATE_FILE.with_suffix(STATE_FILE.suffix + f".tmp-{os.getpid()}")
+    tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, STATE_FILE)
 
 
 def file_hash(path: Path) -> str:
@@ -217,8 +220,15 @@ def collect_notes(vault: Path, state: dict[str, Any]) -> list[NoteItem]:
 
     processed = state.get("processed", {})
     notes: list[NoteItem] = []
+    tech_real = tech_root.resolve()
     for path in sorted(tech_root.rglob("*.md")):
         if should_skip_note(path, tech_root):
+            continue
+        # シンボリックリンクでVaultの外を指しているものは対象外にする
+        try:
+            if path.is_symlink() or not path.resolve().is_relative_to(tech_real):
+                continue
+        except (OSError, ValueError):
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         if frontmatter_has_key(text, "consolidated_into"):
@@ -300,7 +310,13 @@ def group_by_theme(notes: list[NoteItem], results: list[dict[str, Any]]) -> dict
     """AI分類結果をテーマごとに束ねる。"""
     by_rel = {note.rel: note for note in notes}
     grouped: dict[str, list[tuple[NoteItem, str]]] = {}
+    seen: set[str] = set()
     for item in results:
+        # 同じノートへの重複回答は最初の1件だけ採用する（水増しで3本に達しないように）
+        rel_key = str(item.get("file", ""))
+        if rel_key in seen:
+            continue
+        seen.add(rel_key)
         note = by_rel.get(str(item.get("file", "")))
         if not note:
             continue
@@ -434,6 +450,12 @@ def run(dry_run: bool = False) -> int:
             continue
         log(f"テーマまとめ生成: {theme} ({len(items)}件)")
         body = build_summary(client, theme, items)
+        if not body or len(body.strip()) < 40:
+            # 生成に失敗（空・極端に短い）。書き込まず処理済みにもせず、次回に回す
+            log(f"生成結果が不十分のため保留: {theme}")
+            for note, point in items:
+                pending[note.rel] = {"digest": note.digest, "theme": theme, "point": point}
+            continue
         target = write_theme_note(vault, theme, body, existing_stems)
         if target is None:
             # 既存のまとめがある等で書けなかった。処理済みにすると永久に反映されないため保留に戻す

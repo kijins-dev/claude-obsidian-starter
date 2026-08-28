@@ -278,6 +278,9 @@ def run(day_arg: str | None) -> int:
         log(f"日次ノートが{len(blocks)}日分のため生成しません（4日分以上が必要）。")
         return 0
     body = generate_body(api_key, spec, blocks)
+    if not body or len(body.strip()) < 40:
+        # 生成に失敗（空・極端に短い）。書き込まず終了し、次回の実行で再試行する
+        return error("生成結果が不十分だったため書き込みませんでした。次回の実行で再試行します。")
     content = frontmatter(spec) + insert_day_links(body, blocks) + "\n"
     write_new(output, content)
     log(f"週次ノート作成: {output}")
