@@ -11,7 +11,7 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import anthropic
+from ai_client import ask, backend_name, is_available
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -35,17 +35,20 @@ def load_env(path: Path) -> None:
 
 load_env(BASE_DIR / ".env")
 
-for required_key in ("VAULT_PATH", "ANTHROPIC_API_KEY"):
-    if not os.environ.get(required_key):
-        print(f"エラー: {required_key} が設定されていません。ingest/.env を確認してください（README Step 4参照）。")
-        sys.exit(1)
+if not os.environ.get("VAULT_PATH"):
+    print("エラー: VAULT_PATH が設定されていません。ingest/.env を確認してください（README Step 4参照）。")
+    sys.exit(1)
+
+_ok, _reason = is_available()
+if not _ok:
+    print(f"エラー: {_reason}")
+    sys.exit(1)
 
 VAULT = Path(os.environ["VAULT_PATH"]).expanduser()
 CLIPPINGS_DIR = VAULT / "Clippings"
 INBOX_DIR = VAULT / "00_受信箱"
 WIKI_DIR = VAULT / "04_技術ドキュメント"
 DAILY_DIR = VAULT / "01_01_デイリーノート"
-client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
 
 def log(message: str) -> None:
@@ -53,22 +56,6 @@ def log(message: str) -> None:
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{ts}] {message}")
 
-
-def response_text(response) -> str:
-    """API応答から本文テキストだけを連結して返す。
-    思考ブロック等のtextを持たないブロックが混ざっても落ちないようにする。"""
-    parts = []
-    for block in getattr(response, "content", []) or []:
-        if getattr(block, "type", None) == "text" and getattr(block, "text", None):
-            parts.append(block.text)
-    if parts:
-        return "\n".join(parts)
-    # 念のためのフォールバック
-    for block in getattr(response, "content", []) or []:
-        text = getattr(block, "text", None)
-        if text:
-            return text
-    return ""
 
 
 def load_state() -> dict:
@@ -181,12 +168,8 @@ def triage_files(files: list[Path]) -> dict[str, list[dict]]:
 ```json
 {{"results":[{{"file":"ファイル一覧のパスをそのまま","grade":"A","topic":"トピック名","reason":"理由"}}]}}
 ```"""
-    response = client.messages.create(
-        model="claude-sonnet-5",
-        max_tokens=2000,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    data = parse_json_object(response_text(response), "results")
+    answer = ask(prompt, max_tokens=2000)
+    data = parse_json_object(answer, "results")
     if not data:
         log("トリアージ結果のパースに失敗しました")
         return {"A": [], "B": [], "C": []}
@@ -289,12 +272,8 @@ def generate_wiki_page(files_info: list[dict], existing_stems: set[str]) -> None
 </素材>
 
 Markdownのみ出力してください。"""
-        response = client.messages.create(
-            model="claude-sonnet-5",
-            max_tokens=4000,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        wiki_content = re.sub(r"^```(?:markdown|md)?\n", "", response_text(response))
+        answer = ask(prompt, max_tokens=4000)
+        wiki_content = re.sub(r"^```(?:markdown|md)?\n", "", answer)
         wiki_content = re.sub(r"\n```$", "", wiki_content)
         wiki_content = sanitize_wikilinks(ensure_wiki_frontmatter(wiki_content), existing_stems)
         wiki_path = WIKI_DIR / f"{topic}.md"
@@ -426,12 +405,8 @@ def process_daily_notes(days: int, existing_stems: set[str]) -> None:
 ```json
 {{"insights":[{{"topic":"トピック名","summary":"1-2文の要約","details":"具体的な知見","project":"関連プロジェクト名"}}]}}
 ```"""
-        response = client.messages.create(
-            model="claude-sonnet-5",
-            max_tokens=3000,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        data = parse_json_object(response_text(response), "insights")
+        answer = ask(prompt, max_tokens=3000)
+        data = parse_json_object(answer, "insights")
         if data is None:
             # 解析失敗は処理済みにせず翌日再試行する
             log(f"デイリーノート {date_str}: 知見抽出のパースに失敗（翌日再試行）")

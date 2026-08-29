@@ -7,7 +7,7 @@
 ## 進め方の原則
 
 - 各ステップの実行前に既存ファイルを確認し、**既存の設定・ファイルを上書きしない**（マージまたはスキップ）
-- ユーザーに聞くのは「Vaultの場所」と「Anthropic APIキー」の2つだけ。それ以外は自動で進める
+- **ユーザーに聞くのは「Vaultの場所」だけ**。APIキーは不要（Claude Codeのサブスク枠で動く）。それ以外は自動で進める
 - 専門用語を使わず、「何ができるようになるか」で説明する
 
 ## Step 0: 導入前後の変化を先に説明する（必須）
@@ -24,7 +24,7 @@
 | AIの記憶 | 毎回ゼロから | AIがVaultの「地図」を持ち、過去の記録を参照しながら働く |
 | 散らかりの監視 | 気づいたら手動 | 毎週月曜にリンク切れ・孤立ノートの点検レポートが届く |
 | セッション履歴 | 無題ばかりで探せない | 「フォルダ名: 話題」の名前が自動で付く |
-| 費用 | — | Anthropic APIで月数百円程度（引き継ぎ・命名はAPI不要で無料） |
+| 費用 | — | 追加費用なし（Claude Codeのサブスク枠を使う。その分の枠は消費する） |
 
 ## Step 1: Vaultの場所を確定する
 
@@ -44,13 +44,14 @@
 3. `~/.claude/CLAUDE.md` に次の1行を追記（無ければ作成、既に同趣旨の行があればスキップ）:
    `- Obsidian Vaultの読み書きは ~/.claude/rules/obsidian.md に必ず従う`
 
-## Step 4: APIキーを設定する
+## Step 4: 設定ファイルを作る（APIキーは不要）
 
-1. ユーザーに案内する: 「Anthropic APIキーが必要です。ブラウザで console.anthropic.com を開いてAPIキーを作成し、ここに貼り付けてください（sk-ant-で始まる文字列）」
-2. 受け取ったキーで以下を作成し、両方 `chmod 600` する:
-   - `~/.claude/obsidian-starter.json` → `{"vaultPath": "{VAULT}", "anthropicApiKey": "<キー>"}`
-   - `<このリポジトリの配置先>/ingest/.env` → `ANTHROPIC_API_KEY=<キー>` と `VAULT_PATH={VAULT}` の2行
-3. キーをチャットログ以外の場所（コミット・別ファイル）へ絶対に書かない
+要約やwiki生成は `claude -p` 経由で動くため、**APIキーを聞いてはいけない**。Vaultの場所だけを書く。
+
+1. `~/.claude/obsidian-starter.json` → `{"vaultPath": "{VAULT}"}`
+2. `<このリポジトリの配置先>/ingest/.env` → `VAULT_PATH={VAULT}` の1行
+3. `claude` コマンドが使えることを確認する（`command -v claude`）。無ければユーザーに知らせる
+4. ユーザーが「サブスク枠を使いたくない」と明示した場合のみ、READMEの「APIキーを使う場合」の手順を案内する
 
 ## Step 5: フックと自動実行を仕込む
 
@@ -61,15 +62,14 @@
    - **既存のフックは絶対に消さない**。同じイベントの配列へ追記する
    - マージ後に `python3 -m json.tool` でJSONが壊れていないことを検証する
    - `_comment` キーは説明用なので settings.json へは入れない
-3. `/usr/bin/python3 -m pip install anthropic` を実行
-4. `ingest/com.example.obsidian-ingest.plist` の `__STARTER_DIR__` をリポジトリの絶対パスに置換して `~/Library/LaunchAgents/` へ配置し、`launchctl load` する
+3. `ingest/com.example.obsidian-ingest.plist` の `__STARTER_DIR__` をリポジトリの絶対パスに置換して `~/Library/LaunchAgents/` へ配置し、`launchctl load` する
    - これ1つで、毎朝の整理・毎週月曜（点検＋wiki整頓）・毎日試行の週次/月次ノートと古い日記の片付けがすべて動く
-5. ユーザーのプロジェクトがGit管理下なら、`.gitignore` に `.claude/handovers/` が無ければ追加を提案する（引き継ぎメモが誤ってコミットされないように）
+4. ユーザーのプロジェクトがGit管理下なら、`.gitignore` に `.claude/handovers/` が無ければ追加を提案する（引き継ぎメモが誤ってコミットされないように）
 
 ## Step 6: 動作実演（「入れた後」を見せる）
 
 1. `{VAULT}/00_受信箱/` にサンプルメモ（何か技術的な内容を3行程度）を1枚作成する
-2. `cd <リポジトリ>/ingest && /usr/bin/python3 ingest.py` を実行（数円のAPI費用が掛かる旨を一言添える）
+2. `cd <リポジトリ>/ingest && /usr/bin/python3 ingest.py` を実行（サブスク枠を少し使う旨を一言添える）
 3. `{VAULT}/04_技術ドキュメント/` に生成されたwikiページをユーザーに見せて「これが毎朝5時に自動で起きます」と説明する
 4. フックの確認は「この会話が終わったあと、`01_01_デイリーノート/{今年}年/今日の日付.md` に要約が書かれます。次の会話で確認してみてください」と案内する
 
@@ -90,5 +90,5 @@
 ## トラブル時
 
 - フックが書き込まない → `~/.claude/obsidian-starter.json` のパスとキーを確認。フックは失敗しても静かに終了する設計
-- ingestが失敗する → `ingest/logs/` の最新ログを読む。APIキー・`VAULT_PATH` の設定ミスが大半
+- ingestが失敗する → `ingest/logs/` の最新ログを読む。`VAULT_PATH` の設定ミスか、`claude` コマンドが見つからない/未ログインが大半（ターミナルで `claude` を起動し `/login` を実行してもらう）
 - launchdが動かない → `launchctl list | grep obsidian-ingest` で登録確認。手動実行（Step 6）が通るならパス置換ミスを疑う

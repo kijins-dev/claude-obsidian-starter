@@ -56,9 +56,12 @@ Claude Code（AIコーディングエージェント）にObsidian Vaultを「�
 - macOS（自動実行の仕組みにlaunchdを使うため。フックとルールだけならOS問わず）
 - [Claude Code](https://claude.com/claude-code)（インストール済みであること）
 - [Obsidian](https://obsidian.md/)（無料）
-- Anthropic APIキー（要約とwiki生成に使用。[console.anthropic.com](https://console.anthropic.com/) で取得。目安: 毎日実行しても月数百円程度）
-- Python 3.9以降（macOS標準の `/usr/bin/python3` でOK）＋ `/usr/bin/python3 -m pip install anthropic`
-- Node.js 18以降（Stopフックの実行に使用。`node -v` で確認、なければ [nodejs.org](https://nodejs.org/) から）
+- Python 3.9以降（macOS標準の `/usr/bin/python3` でOK）
+- Node.js 18以降（フックの実行に使用。`node -v` で確認、なければ [nodejs.org](https://nodejs.org/) から）
+
+**APIキーは不要です。** 要約やwiki生成は、すでにログイン済みのClaude Code（`claude -p`）を通して実行するため、
+Claude Codeのサブスクリプション枠でそのまま動きます。追加の課金設定もキーの取得も要りません。
+（APIキーを使いたい場合は後述の「APIキーを使う場合」を参照）
 
 ## セットアップ（15〜30分）
 
@@ -106,19 +109,12 @@ cp hooks/*.js ~/.claude/hooks/
 | `session-start-context.js` | セッション開始時に前回の引き継ぎを読み込ませる（API不要・無料） |
 | `session-title.js` | セッションに「フォルダ名: 話題」の名前を付ける（API不要・無料） |
 
-設定ファイル `~/.claude/obsidian-starter.json` を作ります:
+設定ファイル `~/.claude/obsidian-starter.json` を作ります（Vaultの場所を教えるだけです）:
 
 ```json
 {
-  "vaultPath": "/Users/あなた/Documents/あなたのVault",
-  "anthropicApiKey": "sk-ant-..."
+  "vaultPath": "/Users/あなた/Documents/あなたのVault"
 }
-```
-
-APIキーが入るファイルなので、自分以外に読めないよう権限を絞っておきます:
-
-```bash
-chmod 600 ~/.claude/obsidian-starter.json
 ```
 
 最後に `~/.claude/settings.json` へフックを登録します。`hooks/settings-example.json` の
@@ -160,19 +156,15 @@ cp -r ingest ~/claude-obsidian-starter/
 cd ~/claude-obsidian-starter/ingest
 ```
 
-`.env` ファイルを作ります:
+`.env` ファイルを作ります（こちらもVaultの場所だけ）:
 
 ```
-ANTHROPIC_API_KEY=sk-ant-...
 VAULT_PATH=/Users/あなた/Documents/あなたのVault
 ```
-
-こちらもAPIキーが入るので権限を絞ります: `chmod 600 .env`
 
 手動で1回動かして動作確認:
 
 ```bash
-/usr/bin/python3 -m pip install anthropic  # 必ずこのpython3に入れる（自動実行と同じPythonを使うため）
 /usr/bin/python3 ingest.py
 ```
 
@@ -205,8 +197,14 @@ launchctl load ~/Library/LaunchAgents/com.example.obsidian-ingest.plist
 **Q. Obsidianアプリを起動していなくても動く？**
 動きます。Vaultはただのフォルダで、全部品はファイルを直接読み書きします。Obsidianは「人間が読むときのビューア」です。
 
-**Q. APIコストはどれくらい？**
-日記フックは応答終了ごとに要約を作りますが1回あたり1円未満で、同じセッションでは5分間キャッシュを使うため呼びすぎません。毎朝の自動整理・週次・月次は素材量によりますが月数百円程度が目安です。引き継ぎ・命名の3フックはAPIを使わないため無料です。
+**Q. お金はかかる？**
+既定では**追加の費用はかかりません**。Claude Codeのサブスクリプション枠を使うためです。
+ただし枠を消費するので、要約や整理の分だけ普段のコーディングに使える量は少し減ります。
+引き継ぎ・命名の3フックはAIを使わないため、枠も消費しません。
+日記フックは同じセッションでは5分間キャッシュを使うので、呼びすぎることはありません。
+
+**Q. サブスク枠を使いたくない（別会計にしたい）**
+APIキーを設定すれば、そちらが優先して使われます。「APIキーを使う場合」を参照してください。
 
 **Q. APIへ何が送られる？**
 処理ごとに異なります。**Vaultに機密情報を置いている場合は、この範囲を確認してから導入してください。**
@@ -217,9 +215,9 @@ launchctl load ~/Library/LaunchAgents/com.example.obsidian-ingest.plist
 | 毎朝の整理 | `Clippings/` `00_受信箱/` の未処理ノート本文と、デイリーノートのセッション記録**そのもの** |
 | テーマ別まとめ | `04_技術ドキュメント/` のノート本文 |
 | 週次・月次 | デイリーノート／週次ノートの本文 |
-| 引き継ぎ・命名の3フック | 何も送りません（APIを使いません） |
+| 引き継ぎ・命名の3フック | 何も送りません（AIを使いません） |
 
-自動整理系はノート本文をそのまま送るため、伏せ字処理は行っていません。
+送信先はAnthropicです（Claude Code経由でもAPI経由でも同じ）。自動整理系はノート本文をそのまま送るため、伏せ字処理は行っていません。
 見せたくないノートがある場合は、対象フォルダ（`00_受信箱` `04_技術ドキュメント` など）の外に置いてください。
 
 **Q. 自分のノートが勝手に書き換わることはある？**
@@ -236,6 +234,23 @@ launchctl load ~/Library/LaunchAgents/com.example.obsidian-ingest.plist
 
 **Q. Windowsでも使える？**
 ルールファイルとフックはWindowsでも動きます（パスの書き換えは必要）。毎朝の自動実行（launchd）だけはタスクスケジューラ等への読み替えが必要です。
+
+## APIキーを使う場合（任意）
+
+サブスクリプション枠を消費したくない、または定時実行をより確実に動かしたい場合は、
+Anthropic APIキーを設定できます。設定されていればそちらが優先して使われます。
+
+1. [console.anthropic.com](https://console.anthropic.com/) でAPIキーを取得
+2. `/usr/bin/python3 -m pip install anthropic` を実行
+3. 設定に追記して、権限を絞る:
+   - `~/.claude/obsidian-starter.json` に `"anthropicApiKey": "sk-ant-..."` を追加 → `chmod 600 ~/.claude/obsidian-starter.json`
+   - `ingest/.env` に `ANTHROPIC_API_KEY=sk-ant-...` を追加 → `chmod 600 .env`
+
+目安の費用は、毎日使って月数百円程度です。
+
+> **定時実行についての注意**: `claude -p` はmacOSのキーチェーンからログイン情報を読みます。
+> 通常のログイン状態なら毎朝の自動実行も動きますが、Macがログイン画面のままだと失敗することがあります。
+> 確実に動かしたい場合はAPIキーの設定をおすすめします。
 
 ## 応用編
 

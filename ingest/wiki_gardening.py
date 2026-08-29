@@ -15,6 +15,8 @@ import sys
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
+
+from ai_client import ask, is_available
 from typing import Any
 
 
@@ -58,22 +60,6 @@ def log(message: str) -> None:
     print(f"[{ts}] {message}")
 
 
-def response_text(response) -> str:
-    """API応答から本文テキストだけを連結して返す。
-    思考ブロック等のtextを持たないブロックが混ざっても落ちないようにする。"""
-    parts = []
-    for block in getattr(response, "content", []) or []:
-        if getattr(block, "type", None) == "text" and getattr(block, "text", None):
-            parts.append(block.text)
-    if parts:
-        return "\n".join(parts)
-    # 念のためのフォールバック
-    for block in getattr(response, "content", []) or []:
-        text = getattr(block, "text", None)
-        if text:
-            return text
-    return ""
-
 
 def error(message: str) -> int:
     """利用者が直せる形でエラーを表示する。"""
@@ -81,18 +67,19 @@ def error(message: str) -> int:
     return 1
 
 
-def require_env(needs_api_key: bool = True) -> tuple[Path, str | None] | None:
-    """必須環境変数を確認する。"""
+def require_env(needs_ai: bool = True) -> tuple[Path, str | None] | None:
+    """必須の設定を確認する。"""
     load_env(BASE_DIR / ".env")
     vault = os.environ.get("VAULT_PATH")
     if not vault:
         error("VAULT_PATH が未設定です。ingest/.env に VAULT_PATH=/path/to/vault を設定してください。")
         return None
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if needs_api_key and not api_key:
-        error("ANTHROPIC_API_KEY が未設定です。ingest/.env にAPIキーを設定してください。")
-        return None
-    return Path(vault).expanduser(), api_key
+    if needs_ai:
+        ok, reason = is_available()
+        if not ok:
+            error(reason)
+            return None
+    return Path(vault).expanduser(), None
 
 
 def load_state() -> dict[str, Any]:
@@ -271,7 +258,7 @@ def parse_json_object(text: str, key: str) -> dict[str, Any] | None:
         return None
 
 
-def classify_batch(client: Any, notes: list[NoteItem]) -> list[dict[str, Any]]:
+def classify_batch(notes: list[NoteItem]) -> list[dict[str, Any]]:
     """20本単位でテーマ分類を依頼する。"""
     items = []
     for note in notes:
@@ -293,12 +280,8 @@ def classify_batch(client: Any, notes: list[NoteItem]) -> list[dict[str, Any]]:
 入力:
 {json.dumps({"notes": items}, ensure_ascii=False)}
 """
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=3000,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    data = parse_json_object(response_text(response), "results")
+    answer = ask(prompt, max_tokens=3000)
+    data = parse_json_object(answer, "results")
     if not data:
         log("テーマ分類結果のパースに失敗しました")
         return []
@@ -326,7 +309,7 @@ def group_by_theme(notes: list[NoteItem], results: list[dict[str, Any]]) -> dict
     return grouped
 
 
-def build_summary(client: Any, theme: str, items: list[tuple[NoteItem, str]]) -> str:
+def build_summary(theme: str, items: list[tuple[NoteItem, str]]) -> str:
     """テーマまとめ本文を生成する。"""
     sources = []
     for note, point in items:
@@ -352,12 +335,8 @@ def build_summary(client: Any, theme: str, items: list[tuple[NoteItem, str]]) ->
 入力:
 {json.dumps({"sources": sources}, ensure_ascii=False)}
 """
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=5000,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    body = response_text(response).strip()
+    answer = ask(prompt, max_tokens=5000)
+    body = answer.strip()
     body = re.sub(r"^```(?:markdown|md)?\n", "", body)
     body = re.sub(r"\n```$", "", body)
     return body
@@ -395,10 +374,10 @@ def write_theme_note(vault: Path, theme: str, body: str, existing_stems: set[str
 
 def run(dry_run: bool = False) -> int:
     """テーマ分類からまとめノート作成まで実行する。"""
-    env = require_env(needs_api_key=not dry_run)
+    env = require_env(needs_ai=not dry_run)
     if not env:
         return 1
-    vault, api_key = env
+    vault, _ = env
     state = load_state()
     notes = collect_notes(vault, state)
     log(f"対象ノート: {len(notes)}件")
@@ -408,13 +387,6 @@ def run(dry_run: bool = False) -> int:
         for note in notes:
             log(f"dry-run: {note.rel}")
         return 0
-
-    try:
-        import anthropic
-    except ModuleNotFoundError:
-        return error("anthropic パッケージが見つかりません。READMEの手順に沿って依存関係をインストールしてください。")
-
-    client = anthropic.Anthropic(api_key=api_key)
     prior = state.get("pending", {})
     # 保留済みでハッシュが変わっていないノートは、保存済みのテーマを使うので分類し直さない
     to_classify = [
@@ -425,7 +397,7 @@ def run(dry_run: bool = False) -> int:
     for index in range(0, len(to_classify), BATCH_SIZE):
         batch = to_classify[index:index + BATCH_SIZE]
         log(f"テーマ分類: {index + 1}-{index + len(batch)}件目")
-        all_results.extend(classify_batch(client, batch))
+        all_results.extend(classify_batch(batch))
 
     # 前回3本未満で保留にしたノートは、保存済みのテーマで合流させる（再分類しない）
     pending = state.setdefault("pending", {})
@@ -449,7 +421,7 @@ def run(dry_run: bool = False) -> int:
                 pending[note.rel] = {"digest": note.digest, "theme": theme, "point": point}
             continue
         log(f"テーマまとめ生成: {theme} ({len(items)}件)")
-        body = build_summary(client, theme, items)
+        body = build_summary(theme, items)
         if not body or len(body.strip()) < 40:
             # 生成に失敗（空・極端に短い）。書き込まず処理済みにもせず、次回に回す
             log(f"生成結果が不十分のため保留: {theme}")

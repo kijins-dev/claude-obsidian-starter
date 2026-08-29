@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from ai_client import ask, is_available
+
 
 BASE_DIR = Path(__file__).resolve().parent
 MODEL = "claude-sonnet-5"
@@ -57,22 +59,6 @@ def log(message: str) -> None:
     print(f"[{ts}] {message}")
 
 
-def response_text(response) -> str:
-    """API応答から本文テキストだけを連結して返す。
-    思考ブロック等のtextを持たないブロックが混ざっても落ちないようにする。"""
-    parts = []
-    for block in getattr(response, "content", []) or []:
-        if getattr(block, "type", None) == "text" and getattr(block, "text", None):
-            parts.append(block.text)
-    if parts:
-        return "\n".join(parts)
-    # 念のためのフォールバック
-    for block in getattr(response, "content", []) or []:
-        text = getattr(block, "text", None)
-        if text:
-            return text
-    return ""
-
 
 def error(message: str) -> int:
     """利用者が直せる形でエラーを表示する。"""
@@ -87,11 +73,11 @@ def require_env() -> tuple[Path, str] | None:
     if not vault:
         error("VAULT_PATH が未設定です。ingest/.env に VAULT_PATH=/path/to/vault を設定してください。")
         return None
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        error("ANTHROPIC_API_KEY が未設定です。ingest/.env にAPIキーを設定してください。")
+    ok, reason = is_available()
+    if not ok:
+        error(reason)
         return None
-    return Path(vault).expanduser(), api_key
+    return Path(vault).expanduser(), ""
 
 
 def parse_day(value: str) -> date:
@@ -240,17 +226,10 @@ def frontmatter(spec: WeekSpec) -> str:
     )
 
 
-def generate_body(api_key: str, spec: WeekSpec, blocks: list[DailyBlock]) -> str:
+def generate_body(spec: WeekSpec, blocks: list[DailyBlock]) -> str:
     """AI APIで本文を生成する。"""
-    import anthropic
-
-    client = anthropic.Anthropic(api_key=api_key)
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=4000,
-        messages=[{"role": "user", "content": build_prompt(spec, blocks)}],
-    )
-    return clean_ai_text(response_text(response))
+    answer = ask(build_prompt(spec, blocks), max_tokens=4000)
+    return clean_ai_text(answer)
 
 
 def write_new(path: Path, content: str) -> None:
@@ -265,7 +244,7 @@ def run(day_arg: str | None) -> int:
     env = require_env()
     if not env:
         return 1
-    vault, api_key = env
+    vault, _ = env
     base_day = parse_day(day_arg) if day_arg else date.today()
     monday = week_start_for(base_day) if day_arg else previous_week_start(base_day)
     spec = build_week_spec(monday)
@@ -277,7 +256,7 @@ def run(day_arg: str | None) -> int:
     if len(blocks) < MIN_DAYS:
         log(f"日次ノートが{len(blocks)}日分のため生成しません（4日分以上が必要）。")
         return 0
-    body = generate_body(api_key, spec, blocks)
+    body = generate_body(spec, blocks)
     if not body or len(body.strip()) < 40:
         # 生成に失敗（空・極端に短い）。書き込まず終了し、次回の実行で再試行する
         return error("生成結果が不十分だったため書き込みませんでした。次回の実行で再試行します。")

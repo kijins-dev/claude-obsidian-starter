@@ -14,8 +14,11 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 
-const CONFIG_PATH = path.join(os.homedir(), '.claude', 'obsidian-starter.json');
-const STATE_DIR = path.join(os.homedir(), '.claude', 'state', 'obsidian-starter');
+// 設定ファイルの場所。OBSIDIAN_STARTER_CONFIG で差し替えられる（動作確認や複数Vaultの切り替え用）
+const CONFIG_PATH = process.env.OBSIDIAN_STARTER_CONFIG
+  || path.join(os.homedir(), '.claude', 'obsidian-starter.json');
+const STATE_DIR = process.env.OBSIDIAN_STARTER_STATE
+  || path.join(os.homedir(), '.claude', 'state', 'obsidian-starter');
 const MODEL = 'claude-sonnet-5';
 const SUMMARY_INTERVAL_MS = 5 * 60 * 1000; // 要約APIの最短呼び出し間隔
 const MIN_TOOL_OPS = 2;                    // これ未満の軽微なセッションは記録しない
@@ -142,7 +145,50 @@ function cleanupState() {
   } catch { /* ignore */ }
 }
 
-async function callClaude(apiKey, prompt) {
+/** claudeコマンドの実体を探す。launchd等でPATHが最小の場合に備えて候補も見る */
+function findClaudeBinary(config) {
+  const candidates = [
+    config.claudeBin,
+    process.env.CLAUDE_BIN,
+    path.join(os.homedir(), '.local/bin/claude'),
+    '/opt/homebrew/bin/claude',
+    '/usr/local/bin/claude',
+    path.join(os.homedir(), '.claude/local/claude'),
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) return candidate;
+    } catch { /* ignore */ }
+  }
+  try {
+    const { execFileSync } = require('child_process');
+    const found = execFileSync('/usr/bin/which', ['claude'], { encoding: 'utf8' }).trim();
+    if (found) return found;
+  } catch { /* ignore */ }
+  return null;
+}
+
+/** Claude Code経由で問い合わせる（APIキー不要・サブスク枠） */
+function askViaClaudeCode(config, prompt) {
+  const binary = findClaudeBinary(config);
+  if (!binary) throw new Error('claude not found');
+  const { execFileSync } = require('child_process');
+  // --setting-sources "" を必ず付ける。これが無いと、この呼び出しが
+  // 利用者のフックを読み込んで自分自身を再び起動し、無限に連鎖する
+  const args = ['-p', '--model', MODEL, '--setting-sources', '', '--strict-mcp-config'];
+  const out = execFileSync(binary, args, {
+    input: prompt,
+    encoding: 'utf8',
+    timeout: 120000,
+    maxBuffer: 4 * 1024 * 1024,
+    // 認証にmacOSキーチェーンを使うため、この2つが無いとログイン状態を読めない
+    env: { ...process.env, USER: process.env.USER || os.userInfo().username, LOGNAME: process.env.LOGNAME || os.userInfo().username },
+  });
+  return String(out || '').trim();
+}
+
+/** Anthropic APIで問い合わせる（APIキーが設定されている場合のみ） */
+async function askViaApi(apiKey, prompt) {
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -161,6 +207,13 @@ async function callClaude(apiKey, prompt) {
   return textFromContent(data.content).trim();
 }
 
+/** APIキーがあればAPI、無ければClaude Code経由で問い合わせる */
+async function callClaude(config, prompt) {
+  const apiKey = config.anthropicApiKey || process.env.ANTHROPIC_API_KEY;
+  if (apiKey) return askViaApi(apiKey, prompt);
+  return askViaClaudeCode(config, prompt);
+}
+
 /** 応答から「TITLE:」と「SUMMARY:」を取り出す */
 function parseResponse(text) {
   const titleMatch = text.match(/^\s*TITLE:\s*(.+)$/m);
@@ -170,7 +223,7 @@ function parseResponse(text) {
   return { title, summary };
 }
 
-async function getSummary(apiKey, sessionId, parsed) {
+async function getSummary(config, sessionId, parsed) {
   const state = loadState(sessionId);
   const now = Date.now();
   const delta = Math.abs(parsed.changedFiles.length - (state.lastFileCount || 0));
@@ -205,7 +258,7 @@ async function getSummary(apiKey, sessionId, parsed) {
   }
 
   try {
-    const result = parseResponse(await callClaude(apiKey, parts.join('\n')));
+    const result = parseResponse(await callClaude(config, parts.join('\n')));
     saveState(sessionId, {
       lastSummaryAt: now,
       lastFileCount: parsed.changedFiles.length,
@@ -391,7 +444,7 @@ function upsertDailyNote(vaultPath, sessionId, projectName, summary, changedFile
 
     if (!transcriptPath || !sessionId || !fs.existsSync(CONFIG_PATH)) return;
     const config = safeJson(fs.readFileSync(CONFIG_PATH, 'utf8')) || {};
-    if (!config.vaultPath || !config.anthropicApiKey || !fs.existsSync(config.vaultPath)) return;
+    if (!config.vaultPath || !fs.existsSync(config.vaultPath)) return;
 
     const parsed = readTranscript(transcriptPath);
     // 挨拶や短い質問だけのセッションでノートを汚さない。
@@ -408,7 +461,7 @@ function upsertDailyNote(vaultPath, sessionId, projectName, summary, changedFile
     // フック入力に最終応答があればそちらを優先する
     if (input.last_assistant_message) parsed.lastAssistant = input.last_assistant_message;
 
-    const summary = await getSummary(config.anthropicApiKey, sessionId, parsed);
+    const summary = await getSummary(config, sessionId, parsed);
     if (!summary.summary) return;
 
     const projectName = summary.title || path.basename(cwd) || 'セッション';
