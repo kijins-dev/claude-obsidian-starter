@@ -13,6 +13,7 @@ Claude Code（AIコーディングエージェント）にObsidian Vaultを「�
 - **Claude CodeがVaultを迷わず読める**: 「どのフォルダに何があるか」の地図をルールファイルで渡すので、過去の判断や知見をAIが参照しながら働ける
 - **散らかりを毎週自動点検**: リンク切れ・孤立ノートを毎週月曜に検出してレポートする
 - **セッションに名前が付く**: 履歴から目的の会話を探しやすくなる
+- **リンクを渡すと中身を読んで解説してくれる**: YouTube・X・記事のURLを渡すと、実際に内容を取得して周辺情報まで補って解説し、Obsidianに残す
 
 ポイントは、**AIが賢いから読めるのではなく、地図とルールを渡してあるから読める**という設計です。
 
@@ -50,6 +51,7 @@ Claude Code（AIコーディングエージェント）にObsidian Vaultを「�
 | 週次・月次まとめ | `ingest/gen_weekly_note.py` / `gen_monthly_note.py` | 定例の振り返り |
 | wikiの整頓 | `ingest/wiki_gardening.py` / `weekly_lint.py` | 図書室の司書 |
 | 古い日記の片付け | `ingest/archive_daily_notes.py`（毎月1日） | 書庫への移動 |
+| URLの解説 | `skills/explain-url/` + `tools/fetch_url.py` | 資料を読んでから説明する調査員 |
 
 ## 必要なもの
 
@@ -192,6 +194,70 @@ launchctl load ~/Library/LaunchAgents/com.example.obsidian-ingest.plist
    Macがスリープで月曜の実行を逃しても、翌日以降に自動で追いつきます。
    なお週次ノートは、その週にデイリーノートが4日分以上ないと作られません）
 
+### Step 6: URLの解説機能を入れる（任意・おすすめ）
+
+「このYouTube解説して」「この記事まとめて」と言うと、**実際に中身を取得してから**解説し、
+Obsidianに保存してくれるようになります。
+
+```bash
+mkdir -p ~/.claude/skills
+cp -r skills/explain-url ~/.claude/skills/
+```
+
+コピーしたら `~/.claude/skills/explain-url/SKILL.md` を開き、`<キットの配置先>` を
+実際のパス（例: `~/claude-obsidian-starter`）に書き換えてください。
+
+**対応と必要な準備**
+
+| 対象 | 準備 | 費用 |
+|---|---|---|
+| 一般のWebページ・記事 | 不要 | 無料 |
+| YouTube（字幕・概要欄） | yt-dlp の導入 | 無料 |
+| X（旧Twitter）の投稿 | X APIのトークン | 有料プランが必要 |
+
+**yt-dlp の導入（YouTube用・無料）**
+
+```bash
+brew install yt-dlp
+# Homebrewを使っていない場合
+/usr/bin/python3 -m pip install --user yt-dlp
+```
+
+導入したら、試しに動かしてみてください:
+
+```bash
+/usr/bin/python3 tools/fetch_url.py "https://www.youtube.com/watch?v=..." --max-chars 500
+```
+
+タイトルと字幕が表示されれば成功です。字幕が無い動画の場合はその旨が表示され、
+概要欄とタイトルの範囲で解説されます。
+
+### Xの投稿を読めるようにする（任意・有料）
+
+Xは公開投稿の取得にも**有料プランのAPIトークン**が必要です（金額と条件は変わるため、
+必ず公式で最新を確認してください）。無くてもYouTubeと記事は使えます。
+
+1. [console.x.com](https://console.x.com/) にXアカウントでログインし、開発者アカウントを作る
+   （利用規約に同意し、用途を記入します）
+2. ダッシュボードで「New App」からアプリを作る
+3. 発行される認証情報のうち **Bearer Token** を控える
+   （**認証情報は一度しか表示されません。**その場でパスワード管理ツール等に保存してください）
+4. トークンを環境変数として設定する:
+
+```bash
+echo 'export X_BEARER_TOKEN="ここにBearer Token"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+5. 動作確認:
+
+```bash
+/usr/bin/python3 tools/fetch_url.py "https://x.com/<ユーザー名>/status/<投稿ID>"
+```
+
+> トークンを設定しない場合、XのURLを渡すと「トークンが無いので本文を貼ってください」と
+> 案内されます。貼り付ければ、そこから解説できます。
+
 ## よくある質問
 
 **Q. Obsidianアプリを起動していなくても動く？**
@@ -216,6 +282,7 @@ APIキーを設定すれば、そちらが優先して使われます。「API�
 | テーマ別まとめ | `04_技術ドキュメント/` のノート本文 |
 | 週次・月次 | デイリーノート／週次ノートの本文 |
 | 引き継ぎ・命名の3フック | 何も送りません（AIを使いません） |
+| URLの解説 | 取得したページ・動画字幕・投稿の本文（解説を作るため） |
 
 送信先はAnthropicです（Claude Code経由でもAPI経由でも同じ）。自動整理系はノート本文をそのまま送るため、伏せ字処理は行っていません。
 見せたくないノートがある場合は、対象フォルダ（`00_受信箱` `04_技術ドキュメント` など）の外に置いてください。
