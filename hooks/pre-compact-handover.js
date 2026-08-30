@@ -170,7 +170,8 @@ function save(content, cwd, sessionId, stamp) {
     const input = safeJson(await readStdin()) || {};
     const transcriptPath = input.transcript_path || input.transcriptPath;
     const cwd = input.cwd;
-    const trigger = input.trigger || 'unknown';
+    // PreCompactでは trigger が渡る。Stopイベントから呼ばれた場合はそれと分かる表示にする
+    const trigger = input.trigger || (input.hook_event_name === 'Stop' ? 'セッション終了' : 'unknown');
     if (!transcriptPath) return;
 
     const stamp = timestamp();

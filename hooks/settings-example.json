@@ -4,15 +4,27 @@
     "SessionStart": [
       {
         "hooks": [
-          { "type": "command", "command": "node ~/.claude/hooks/session-start-context.js", "timeout": 10 },
-          { "type": "command", "command": "node ~/.claude/hooks/session-title.js", "timeout": 5 }
+          {
+            "type": "command",
+            "command": "node ~/.claude/hooks/session-start-context.js",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "node ~/.claude/hooks/session-title.js",
+            "timeout": 5
+          }
         ]
       }
     ],
     "UserPromptSubmit": [
       {
         "hooks": [
-          { "type": "command", "command": "node ~/.claude/hooks/session-title.js", "timeout": 5 }
+          {
+            "type": "command",
+            "command": "node ~/.claude/hooks/session-title.js",
+            "timeout": 5
+          }
         ]
       }
     ],
@@ -20,7 +32,11 @@
       {
         "matcher": "",
         "hooks": [
-          { "type": "command", "command": "node ~/.claude/hooks/pre-compact-handover.js", "timeout": 30 }
+          {
+            "type": "command",
+            "command": "node ~/.claude/hooks/pre-compact-handover.js",
+            "timeout": 30
+          }
         ]
       }
     ],
@@ -28,7 +44,16 @@
       {
         "matcher": "",
         "hooks": [
-          { "type": "command", "command": "node ~/.claude/hooks/stop-daily-note.js", "timeout": 60 }
+          {
+            "type": "command",
+            "command": "node ~/.claude/hooks/stop-daily-note.js",
+            "timeout": 60
+          },
+          {
+            "type": "command",
+            "command": "node ~/.claude/hooks/pre-compact-handover.js",
+            "timeout": 30
+          }
         ]
       }
     ]
